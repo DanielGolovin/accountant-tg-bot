@@ -1,0 +1,7 @@
+services:
+  myapp:
+    image: accountant-bot
+    volumes:
+      - ./db:/db  
+    environment:
+      - TELEGRAM_BOT_API_TOKEN=${TELEGRAM_BOT_API_TOKEN}

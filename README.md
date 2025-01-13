@@ -1,1 +1,1 @@
-# accountant-tg-bot
+# accountant-telegram-bot

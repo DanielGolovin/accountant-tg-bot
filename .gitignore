@@ -1,3 +1,4 @@
 .env
-tmp
+/tmp
 db
+accountant-bot.tar
