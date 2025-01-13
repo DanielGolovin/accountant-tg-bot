@@ -1,0 +1,12 @@
+services:
+  app:
+    image: accountant-bot
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./:/app
+      - ./db:/app/db
+    environment:
+      - SERVER_PORT=${SERVER_PORT}
+      - TELEGRAM_BOT_API_TOKEN=${TELEGRAM_BOT_API_TOKEN}
