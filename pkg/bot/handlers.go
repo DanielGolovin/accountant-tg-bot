@@ -65,27 +65,17 @@ func (b *Bot) handleRegularMessage(message *tgbotapi.Message) {
 		return
 	}
 
-	currentDate := time.Now().Format("2006-01")
-	originalAmount := amount
-	currency = b.determineCurrency(currency, message.Text)
+	currentDate := time.Now().Format("2006-01-02")
 	err = b.DB.AddRecord(currentDate, category, amount, currency)
 	if err != nil {
 		b.API.Send(tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error adding record: %v", err)))
 		return
 	}
 
-	responseMsg := b.formatResponseMessage(currentDate, category, originalAmount, currency)
+	responseMsg := b.formatResponseMessage(currentDate, category, amount, currency)
 	msg := tgbotapi.NewMessage(message.Chat.ID, responseMsg)
 	msg.ParseMode = "MarkdownV2"
 	b.API.Send(msg)
-}
-
-func (b *Bot) determineCurrency(currency, messageText string) string {
-	defaultCurrency := b.DB.GetDefaultCurrency()
-	if currency == "USD" && !strings.Contains(strings.ToUpper(messageText), "USD") {
-		currency = defaultCurrency
-	}
-	return currency
 }
 
 func (b *Bot) formatResponseMessage(currentDate, category string, originalAmount interface{}, currency string) string {
@@ -95,26 +85,15 @@ func (b *Bot) formatResponseMessage(currentDate, category string, originalAmount
 	if err != nil {
 		return "Error processing data"
 	}
-	totalUSD := b.DB.SumMonth(currentDate)
+	totalInDefaultCurrency, err := b.DB.SumMonthInDefaultCurrency(currentDate)
+	if err != nil {
+		return "Error processing data"
+	}
 	defaultCurrency := b.DB.GetDefaultCurrency()
-	_, defaultCurrencyStr := b.calculateTotalInDefaultCurrency(totalUSD, defaultCurrency)
 	responseMsg := b.createExpenseMessage(originalAmount, category, currency, defaultCurrency)
-	responseMsg += fmt.Sprintf("Total for this month: %.2f USD%s\n", totalUSD, defaultCurrencyStr)
+	responseMsg += fmt.Sprintf("Total for this month in %s: %.2f\n", defaultCurrency, totalInDefaultCurrency)
 	responseMsg += "```json\n" + string(jsonBytes) + "\n```"
 	return utils.EscapeMarkdownV2(responseMsg)
-}
-
-func (b *Bot) calculateTotalInDefaultCurrency(totalUSD float64, defaultCurrency string) (float64, string) {
-	var totalInDefaultCurrency float64
-	var defaultCurrencyStr string
-	if defaultCurrency != "USD" {
-		rate, err := b.Exchange.GetRateToUSD(defaultCurrency)
-		if err == nil && rate > 0 {
-			totalInDefaultCurrency = totalUSD / rate
-			defaultCurrencyStr = fmt.Sprintf(" (≈ %.2f %s)", totalInDefaultCurrency, defaultCurrency)
-		}
-	}
-	return totalInDefaultCurrency, defaultCurrencyStr
 }
 
 func (b *Bot) createExpenseMessage(originalAmount interface{}, category, currency, defaultCurrency string) string {
@@ -153,6 +132,8 @@ func (b *Bot) handleCommand(message *tgbotapi.Message) {
 		b.handleDumpDbCommand(message)
 	case "setcurrency":
 		b.handleSetCurrencyCommand(message)
+	case "setinputcurrency":
+		b.handleSetInputCurrencyCommand(message)
 	case "help":
 		b.handleHelpCommand(message)
 	}
@@ -160,13 +141,15 @@ func (b *Bot) handleCommand(message *tgbotapi.Message) {
 
 func (b *Bot) handleHelpCommand(message *tgbotapi.Message) {
 	defaultCurrency := b.DB.GetDefaultCurrency()
+	defaultInputCurrency := b.DB.GetDefaultInputCurrency()
 
 	helpText := fmt.Sprintf(`Available commands:
-- Add expense: "<amount> <category>" (uses default currency: %s)
+- Add expense: "<amount> <category>" (uses default input currency: %s)
 - Add expense with explicit currency: "<amount> <currency> <category>"
-- /setcurrency <currency> - Set default currency (e.g. USD, EUR, RSD)
+- /setcurrency <currency> - Set default output currency (e.g. USD, EUR, RSD)
+- /setinputcurrency <currency> - Set default input currency (e.g. USD, EUR, RSD)
 - /dump_db - Download database
-- /help - Show this help`, defaultCurrency)
+- /help - Show this help`, defaultCurrency, defaultInputCurrency)
 
 	b.API.Send(tgbotapi.NewMessage(message.Chat.ID, helpText))
 }
@@ -176,7 +159,7 @@ func (b *Bot) handleSetCurrencyCommand(message *tgbotapi.Message) {
 	if args == "" {
 		defaultCurrency := b.DB.GetDefaultCurrency()
 		b.API.Send(tgbotapi.NewMessage(message.Chat.ID,
-			fmt.Sprintf("Current default currency is %s. To change it, use /setcurrency <currency-code>", defaultCurrency)))
+			fmt.Sprintf("Current default output currency is %s. To change it, use /setcurrency <currency-code>", defaultCurrency)))
 		return
 	}
 
@@ -192,7 +175,31 @@ func (b *Bot) handleSetCurrencyCommand(message *tgbotapi.Message) {
 	b.DB.SetDefaultCurrency(currency)
 
 	b.API.Send(tgbotapi.NewMessage(message.Chat.ID,
-		fmt.Sprintf("Default currency set to %s. All new expenses will use this currency unless specified otherwise.", currency)))
+		fmt.Sprintf("Default output currency set to %s. All new expenses will use this currency unless specified otherwise.", currency)))
+}
+
+func (b *Bot) handleSetInputCurrencyCommand(message *tgbotapi.Message) {
+	args := strings.TrimSpace(message.CommandArguments())
+	if args == "" {
+		defaultInputCurrency := b.DB.GetDefaultInputCurrency()
+		b.API.Send(tgbotapi.NewMessage(message.Chat.ID,
+			fmt.Sprintf("Current default input currency is %s. To change it, use /setinputcurrency <currency-code>", defaultInputCurrency)))
+		return
+	}
+
+	currency := strings.ToUpper(args)
+
+	_, err := b.Exchange.GetRateToUSD(currency)
+	if err != nil {
+		b.API.Send(tgbotapi.NewMessage(message.Chat.ID,
+			fmt.Sprintf("Invalid currency code '%s'. Please use a valid 3-letter currency code (e.g. USD, EUR, RSD).", currency)))
+		return
+	}
+
+	b.DB.SetDefaultInputCurrency(currency)
+
+	b.API.Send(tgbotapi.NewMessage(message.Chat.ID,
+		fmt.Sprintf("Default input currency set to %s. All new expenses will use this currency unless specified otherwise.", currency)))
 }
 
 func (b *Bot) handleDumpDbCommand(message *tgbotapi.Message) {

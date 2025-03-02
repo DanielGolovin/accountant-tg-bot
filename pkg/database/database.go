@@ -11,10 +11,15 @@ import (
 // DB structure
 // {
 //   "settings": {
-//     "defaultCurrency": "USD"
+//     "defaultInputCurrency": "USD",
+//     "defaultOutputCurrency": "USD"
 //   },
 //   "2021-01-01": {
-//     "category": float64[],  // All amounts are stored in USD with 2 decimal places
+//     "category": {
+// 			"USD": [10.0, 20.0, 30.0],
+// 			"EUR": [8.0, 16.0, 24.0],
+//          ... etc
+// 		},  // All amounts are stored in USD with 2 decimal places
 //   }
 // }
 
@@ -39,7 +44,8 @@ func InitDB() *Database {
 
 		initialData := map[string]interface{}{
 			"settings": map[string]string{
-				"defaultCurrency": "USD",
+				"defaultInputCurrency":  "USD",
+				"defaultOutputCurrency": "USD",
 			},
 		}
 
@@ -67,31 +73,45 @@ func InitDB() *Database {
 func (db *Database) ensureSettings() {
 	rawData := db.ReadRaw()
 
-	if _, ok := rawData["settings"]; !ok {
-		rawData["settings"] = map[string]string{
-			"defaultCurrency": "USD",
+	if settings, ok := rawData["settings"].(map[string]interface{}); ok {
+		if _, ok := settings["defaultInputCurrency"]; !ok {
+			settings["defaultInputCurrency"] = "USD"
 		}
-		db.WriteRaw(rawData)
+		if _, ok := settings["defaultOutputCurrency"]; !ok {
+			settings["defaultOutputCurrency"] = "USD"
+		}
+	} else {
+		rawData["settings"] = map[string]interface{}{
+			"defaultInputCurrency":  "USD",
+			"defaultOutputCurrency": "USD",
+		}
 	}
+
+	db.WriteRaw(rawData)
 }
 
-func (db *Database) Read() map[string]map[string][]float64 {
+func (db *Database) Read() map[string]map[string]map[string][]float64 {
 	rawData := db.ReadRaw()
-	result := make(map[string]map[string][]float64)
+	result := make(map[string]map[string]map[string][]float64)
 
 	for key, value := range rawData {
 		if key != "settings" {
 			if monthData, ok := value.(map[string]interface{}); ok {
-				result[key] = make(map[string][]float64)
+				result[key] = make(map[string]map[string][]float64)
 				for category, amounts := range monthData {
-					if amtArray, ok := amounts.([]interface{}); ok {
-						floatArray := make([]float64, len(amtArray))
-						for i, amt := range amtArray {
-							if floatVal, ok := amt.(float64); ok {
-								floatArray[i] = floatVal
+					if amtMap, ok := amounts.(map[string]interface{}); ok {
+						result[key][category] = make(map[string][]float64)
+						for currency, amtArray := range amtMap {
+							if floatArray, ok := amtArray.([]interface{}); ok {
+								floatSlice := make([]float64, len(floatArray))
+								for i, amt := range floatArray {
+									if floatVal, ok := amt.(float64); ok {
+										floatSlice[i] = floatVal
+									}
+								}
+								result[key][category][currency] = floatSlice
 							}
 						}
-						result[key][category] = floatArray
 					}
 				}
 			}
@@ -121,7 +141,7 @@ func (db *Database) ReadRaw() map[string]interface{} {
 	return result
 }
 
-func (db *Database) Write(data map[string]map[string][]float64) {
+func (db *Database) Write(data map[string]map[string]map[string][]float64) {
 	rawData := db.ReadRaw()
 
 	for key, value := range data {
@@ -147,7 +167,7 @@ func (db *Database) GetDefaultCurrency() string {
 	rawData := db.ReadRaw()
 
 	if settings, ok := rawData["settings"].(map[string]interface{}); ok {
-		if currency, ok := settings["defaultCurrency"].(string); ok {
+		if currency, ok := settings["defaultOutputCurrency"].(string); ok {
 			return currency
 		}
 	}
@@ -159,10 +179,36 @@ func (db *Database) SetDefaultCurrency(currency string) {
 	rawData := db.ReadRaw()
 
 	if settings, ok := rawData["settings"].(map[string]interface{}); ok {
-		settings["defaultCurrency"] = currency
+		settings["defaultOutputCurrency"] = currency
 	} else {
 		rawData["settings"] = map[string]interface{}{
-			"defaultCurrency": currency,
+			"defaultOutputCurrency": currency,
+		}
+	}
+
+	db.WriteRaw(rawData)
+}
+
+func (db *Database) GetDefaultInputCurrency() string {
+	rawData := db.ReadRaw()
+
+	if settings, ok := rawData["settings"].(map[string]interface{}); ok {
+		if currency, ok := settings["defaultInputCurrency"].(string); ok {
+			return currency
+		}
+	}
+
+	return "USD"
+}
+
+func (db *Database) SetDefaultInputCurrency(currency string) {
+	rawData := db.ReadRaw()
+
+	if settings, ok := rawData["settings"].(map[string]interface{}); ok {
+		settings["defaultInputCurrency"] = currency
+	} else {
+		rawData["settings"] = map[string]interface{}{
+			"defaultInputCurrency": currency,
 		}
 	}
 
@@ -196,14 +242,18 @@ func (db *Database) AddRecord(date string, category string, amount interface{}, 
 	data := db.Read()
 
 	if _, ok := data[date]; !ok {
-		data[date] = make(map[string][]float64)
+		data[date] = make(map[string]map[string][]float64)
 	}
 
 	if _, ok := data[date][category]; !ok {
-		data[date][category] = make([]float64, 0)
+		data[date][category] = make(map[string][]float64)
 	}
 
-	data[date][category] = append(data[date][category], usdAmount)
+	if _, ok := data[date][category][currency]; !ok {
+		data[date][category][currency] = make([]float64, 0)
+	}
+
+	data[date][category][currency] = append(data[date][category][currency], amountFloat)
 
 	db.Write(data)
 
@@ -215,14 +265,16 @@ func (db *Database) SumMonthByCategory() map[string]map[string]float64 {
 	result := make(map[string]map[string]float64)
 
 	for date, records := range data {
-		for category, amounts := range records {
+		for category, amountsByCurrency := range records {
 			if _, ok := result[date]; !ok {
 				result[date] = make(map[string]float64)
 			}
 
 			var sum float64 = 0
-			for _, amount := range amounts {
-				sum += amount
+			for _, amounts := range amountsByCurrency {
+				for _, amount := range amounts {
+					sum += amount
+				}
 			}
 
 			result[date][category] = RoundToTwoDecimalPlaces(sum)
@@ -240,11 +292,40 @@ func (db *Database) SumMonth(date string) float64 {
 		return 0
 	}
 
-	for _, amounts := range data[date] {
-		for _, amount := range amounts {
-			sum += amount
+	for _, amountsByCurrency := range data[date] {
+		for _, amounts := range amountsByCurrency {
+			for _, amount := range amounts {
+				sum += amount
+			}
 		}
 	}
 
 	return RoundToTwoDecimalPlaces(sum)
+}
+
+func (db *Database) SumMonthInDefaultCurrency(date string) (float64, error) {
+	data := db.Read()
+	defaultCurrency := db.GetDefaultCurrency()
+	var totalInDefaultCurrency float64
+
+	for _, amountsByCurrency := range data[date] {
+		for currency, amounts := range amountsByCurrency {
+			var sum float64
+			for _, amount := range amounts {
+				sum += amount
+			}
+
+			if currency != defaultCurrency {
+				rate, err := db.Exchange.GetRateToUSD(currency)
+				if err != nil {
+					return 0, err
+				}
+				sum /= rate
+			}
+
+			totalInDefaultCurrency += sum
+		}
+	}
+
+	return RoundToTwoDecimalPlaces(totalInDefaultCurrency), nil
 }
