@@ -32,11 +32,9 @@ func ParseExpenseMessage(message string) (interface{}, string, string, error) {
 			if err != nil {
 				return 0, "", "", &ParseError{Message: "invalid amount", Cause: err}
 			}
-			// Round to 2 decimal places
 			amount = float64(int(amount*100)) / 100
 			return amount, category, currency, nil
 		} else {
-			// For backward compatibility, parse as int if no decimal point
 			amount, err := strconv.Atoi(amountStr)
 			if err != nil {
 				return 0, "", "", &ParseError{Message: "invalid amount", Cause: err}
@@ -62,11 +60,10 @@ func ParseExpenseMessage(message string) (interface{}, string, string, error) {
 		if err != nil {
 			return 0, "", "", &ParseError{Message: "invalid amount", Cause: err}
 		}
-		// Round to 2 decimal places
 		amount = float64(int(amount*100)) / 100
 		return amount, category, "USD", nil
 	} else {
-		// For backward compatibility, parse as int if no decimal point
+		// parse as int if no decimal point
 		amount, err := strconv.Atoi(amountStr)
 		if err != nil {
 			return 0, "", "", &ParseError{Message: "invalid amount", Cause: err}
@@ -75,7 +72,6 @@ func ParseExpenseMessage(message string) (interface{}, string, string, error) {
 	}
 }
 
-// ParseError represents an error that occurred during parsing
 type ParseError struct {
 	Message string
 	Cause   error

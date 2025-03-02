@@ -18,13 +18,11 @@ import (
 //   }
 // }
 
-// Database represents the DB operations
 type Database struct {
 	Path     string
 	Exchange *exchange.RateService
 }
 
-// InitDB initializes the database
 func InitDB() *Database {
 	dbFolder := "db"
 	dbPath := filepath.Join(dbFolder, "db.json")
@@ -39,7 +37,6 @@ func InitDB() *Database {
 			panic(err)
 		}
 
-		// Initialize with empty data and default settings
 		initialData := map[string]interface{}{
 			"settings": map[string]string{
 				"defaultCurrency": "USD",
@@ -62,17 +59,14 @@ func InitDB() *Database {
 		Exchange: exchange.NewRateService(),
 	}
 
-	// Ensure settings exist in the database
 	db.ensureSettings()
 
 	return db
 }
 
-// ensureSettings makes sure settings section exists in the database
 func (db *Database) ensureSettings() {
 	rawData := db.ReadRaw()
 
-	// Check if settings exist
 	if _, ok := rawData["settings"]; !ok {
 		rawData["settings"] = map[string]string{
 			"defaultCurrency": "USD",
@@ -81,12 +75,10 @@ func (db *Database) ensureSettings() {
 	}
 }
 
-// Read reads the database (excluding settings)
 func (db *Database) Read() map[string]map[string][]float64 {
 	rawData := db.ReadRaw()
 	result := make(map[string]map[string][]float64)
 
-	// Copy only the data sections (excluding settings)
 	for key, value := range rawData {
 		if key != "settings" {
 			if monthData, ok := value.(map[string]interface{}); ok {
@@ -109,7 +101,6 @@ func (db *Database) Read() map[string]map[string][]float64 {
 	return result
 }
 
-// ReadRaw reads the raw database including settings
 func (db *Database) ReadRaw() map[string]interface{} {
 	result := make(map[string]interface{})
 
@@ -130,11 +121,9 @@ func (db *Database) ReadRaw() map[string]interface{} {
 	return result
 }
 
-// Write writes to the database (preserving settings)
 func (db *Database) Write(data map[string]map[string][]float64) {
 	rawData := db.ReadRaw()
 
-	// Update data sections but preserve settings
 	for key, value := range data {
 		rawData[key] = value
 	}
@@ -142,7 +131,6 @@ func (db *Database) Write(data map[string]map[string][]float64) {
 	db.WriteRaw(rawData)
 }
 
-// WriteRaw writes the raw data to the database
 func (db *Database) WriteRaw(data map[string]interface{}) {
 	buf, err := json.Marshal(data)
 	if err != nil {
@@ -155,7 +143,6 @@ func (db *Database) WriteRaw(data map[string]interface{}) {
 	}
 }
 
-// GetDefaultCurrency gets the default currency from settings
 func (db *Database) GetDefaultCurrency() string {
 	rawData := db.ReadRaw()
 
@@ -165,11 +152,9 @@ func (db *Database) GetDefaultCurrency() string {
 		}
 	}
 
-	// Default fallback
 	return "USD"
 }
 
-// SetDefaultCurrency sets the default currency in settings
 func (db *Database) SetDefaultCurrency(currency string) {
 	rawData := db.ReadRaw()
 
@@ -184,16 +169,11 @@ func (db *Database) SetDefaultCurrency(currency string) {
 	db.WriteRaw(rawData)
 }
 
-// RoundToTwoDecimalPlaces rounds a float to two decimal places
 func RoundToTwoDecimalPlaces(value float64) float64 {
 	return math.Round(value*100) / 100
 }
 
-// AddRecord adds a new record to the database
-// If the currency is not USD, it will convert the amount to USD before storing
-// Amount can be provided as int or float64, will be stored as float64 with 2 decimal places
 func (db *Database) AddRecord(date string, category string, amount interface{}, currency string) error {
-	// Convert amount to float64
 	var amountFloat float64
 	switch v := amount.(type) {
 	case int:
@@ -202,17 +182,14 @@ func (db *Database) AddRecord(date string, category string, amount interface{}, 
 		amountFloat = v
 	}
 
-	// Convert amount to USD if not already in USD
 	usdAmount := amountFloat
 	if currency != "USD" {
 		convertedAmount, err := db.Exchange.ConvertToUSD(amountFloat, currency)
 		if err != nil {
 			return err
 		}
-		// Round to 2 decimal places for storage
 		usdAmount = RoundToTwoDecimalPlaces(convertedAmount)
 	} else {
-		// Still round to ensure 2 decimal places
 		usdAmount = RoundToTwoDecimalPlaces(usdAmount)
 	}
 
@@ -233,7 +210,6 @@ func (db *Database) AddRecord(date string, category string, amount interface{}, 
 	return nil
 }
 
-// SumMonthByCategory sums all records by category for each month
 func (db *Database) SumMonthByCategory() map[string]map[string]float64 {
 	data := db.Read()
 	result := make(map[string]map[string]float64)
@@ -249,7 +225,6 @@ func (db *Database) SumMonthByCategory() map[string]map[string]float64 {
 				sum += amount
 			}
 
-			// Round the final sum to 2 decimal places
 			result[date][category] = RoundToTwoDecimalPlaces(sum)
 		}
 	}
@@ -257,7 +232,6 @@ func (db *Database) SumMonthByCategory() map[string]map[string]float64 {
 	return result
 }
 
-// SumMonth sums all records for a specific month
 func (db *Database) SumMonth(date string) float64 {
 	data := db.Read()
 	var sum float64 = 0
@@ -272,6 +246,5 @@ func (db *Database) SumMonth(date string) float64 {
 		}
 	}
 
-	// Round the final sum to 2 decimal places
 	return RoundToTwoDecimalPlaces(sum)
 }

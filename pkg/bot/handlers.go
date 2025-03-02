@@ -16,14 +16,12 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// Bot represents the Telegram bot
 type Bot struct {
 	API      *tgbotapi.BotAPI
 	DB       *database.Database
 	Exchange *exchange.RateService
 }
 
-// NewBot creates a new bot instance
 func NewBot(token string, db *database.Database) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
@@ -37,7 +35,6 @@ func NewBot(token string, db *database.Database) (*Bot, error) {
 	}, nil
 }
 
-// Start starts the bot
 func (b *Bot) Start() {
 	updateConfig := tgbotapi.NewUpdate(0)
 	updateConfig.Timeout = 30
@@ -61,7 +58,6 @@ func (b *Bot) Start() {
 	}
 }
 
-// handleRegularMessage handles regular messages from the user
 func (b *Bot) handleRegularMessage(message *tgbotapi.Message) {
 	amount, category, currency, err := utils.ParseExpenseMessage(message.Text)
 	if err != nil {
@@ -84,7 +80,6 @@ func (b *Bot) handleRegularMessage(message *tgbotapi.Message) {
 	b.API.Send(msg)
 }
 
-// determineCurrency determines the currency to use based on the message text
 func (b *Bot) determineCurrency(currency, messageText string) string {
 	defaultCurrency := b.DB.GetDefaultCurrency()
 	if currency == "USD" && !strings.Contains(strings.ToUpper(messageText), "USD") {
@@ -93,7 +88,6 @@ func (b *Bot) determineCurrency(currency, messageText string) string {
 	return currency
 }
 
-// formatResponseMessage formats the response message to be sent to the user
 func (b *Bot) formatResponseMessage(currentDate, category string, originalAmount interface{}, currency string) string {
 	sums := b.DB.SumMonthByCategory()
 	sumsForCurrentMonth := sums[currentDate]
@@ -110,7 +104,6 @@ func (b *Bot) formatResponseMessage(currentDate, category string, originalAmount
 	return utils.EscapeMarkdownV2(responseMsg)
 }
 
-// calculateTotalInDefaultCurrency calculates the total in the default currency
 func (b *Bot) calculateTotalInDefaultCurrency(totalUSD float64, defaultCurrency string) (float64, string) {
 	var totalInDefaultCurrency float64
 	var defaultCurrencyStr string
@@ -124,7 +117,6 @@ func (b *Bot) calculateTotalInDefaultCurrency(totalUSD float64, defaultCurrency 
 	return totalInDefaultCurrency, defaultCurrencyStr
 }
 
-// createExpenseMessage creates the expense message to be sent to the user
 func (b *Bot) createExpenseMessage(originalAmount interface{}, category, currency, defaultCurrency string) string {
 	var responseMsg string
 	if currency != "USD" {
@@ -145,7 +137,6 @@ func (b *Bot) createExpenseMessage(originalAmount interface{}, category, currenc
 	return responseMsg
 }
 
-// convertToUSD converts the amount to USD
 func (b *Bot) convertToUSD(amount interface{}, currency string) (float64, error) {
 	switch v := amount.(type) {
 	case int:
@@ -189,10 +180,8 @@ func (b *Bot) handleSetCurrencyCommand(message *tgbotapi.Message) {
 		return
 	}
 
-	// Convert to uppercase
 	currency := strings.ToUpper(args)
 
-	// Validate currency by trying to get exchange rate
 	_, err := b.Exchange.GetRateToUSD(currency)
 	if err != nil {
 		b.API.Send(tgbotapi.NewMessage(message.Chat.ID,
@@ -200,7 +189,6 @@ func (b *Bot) handleSetCurrencyCommand(message *tgbotapi.Message) {
 		return
 	}
 
-	// Save the currency setting
 	b.DB.SetDefaultCurrency(currency)
 
 	b.API.Send(tgbotapi.NewMessage(message.Chat.ID,
@@ -208,7 +196,7 @@ func (b *Bot) handleSetCurrencyCommand(message *tgbotapi.Message) {
 }
 
 func (b *Bot) handleDumpDbCommand(message *tgbotapi.Message) {
-	data := b.DB.ReadRaw() // Use ReadRaw to include settings
+	data := b.DB.ReadRaw()
 
 	jsonBytes, err := json.Marshal(data)
 	if err != nil {
