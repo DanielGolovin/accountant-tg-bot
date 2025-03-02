@@ -61,8 +61,8 @@ func (b *Bot) Start() {
 	}
 }
 
+// handleRegularMessage handles regular messages from the user
 func (b *Bot) handleRegularMessage(message *tgbotapi.Message) {
-	// Parse the expense message
 	amount, category, currency, err := utils.ParseExpenseMessage(message.Text)
 	if err != nil {
 		b.API.Send(tgbotapi.NewMessage(message.Chat.ID, "Invalid message format. Should be: <amount> <category> or <amount> <currency> <category>"))
@@ -70,80 +70,71 @@ func (b *Bot) handleRegularMessage(message *tgbotapi.Message) {
 	}
 
 	currentDate := time.Now().Format("2006-01")
-
-	// Store the original amount for message display
 	originalAmount := amount
-
-	// If currency is USD in the parsing result but user didn't specify it,
-	// it means we should use the default currency from DB
-	defaultCurrency := b.DB.GetDefaultCurrency()
-
-	if currency == "USD" && !strings.Contains(strings.ToUpper(message.Text), "USD") {
-		// User didn't explicitly specify USD, they just didn't specify any currency
-		// So we should use the default currency from DB
-		currency = defaultCurrency
-	}
-
-	// The currency to display in the message (what the user actually entered or the default)
-	displayCurrency := currency
-
+	currency = b.determineCurrency(currency, message.Text)
 	err = b.DB.AddRecord(currentDate, category, amount, currency)
 	if err != nil {
 		b.API.Send(tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error adding record: %v", err)))
 		return
 	}
 
+	responseMsg := b.formatResponseMessage(currentDate, category, originalAmount, currency)
+	msg := tgbotapi.NewMessage(message.Chat.ID, responseMsg)
+	msg.ParseMode = "MarkdownV2"
+	b.API.Send(msg)
+}
+
+// determineCurrency determines the currency to use based on the message text
+func (b *Bot) determineCurrency(currency, messageText string) string {
+	defaultCurrency := b.DB.GetDefaultCurrency()
+	if currency == "USD" && !strings.Contains(strings.ToUpper(messageText), "USD") {
+		currency = defaultCurrency
+	}
+	return currency
+}
+
+// formatResponseMessage formats the response message to be sent to the user
+func (b *Bot) formatResponseMessage(currentDate, category string, originalAmount interface{}, currency string) string {
 	sums := b.DB.SumMonthByCategory()
 	sumsForCurrentMonth := sums[currentDate]
-
 	jsonBytes, err := json.Marshal(sumsForCurrentMonth)
 	if err != nil {
-		b.API.Send(tgbotapi.NewMessage(message.Chat.ID, "Error processing data"))
-		return
+		return "Error processing data"
 	}
-
 	totalUSD := b.DB.SumMonth(currentDate)
+	defaultCurrency := b.DB.GetDefaultCurrency()
+	_, defaultCurrencyStr := b.calculateTotalInDefaultCurrency(totalUSD, defaultCurrency)
+	responseMsg := b.createExpenseMessage(originalAmount, category, currency, defaultCurrency)
+	responseMsg += fmt.Sprintf("Total for this month: %.2f USD%s\n", totalUSD, defaultCurrencyStr)
+	responseMsg += "```json\n" + string(jsonBytes) + "\n```"
+	return utils.EscapeMarkdownV2(responseMsg)
+}
 
-	// Calculate totals in default currency if it's not USD
+// calculateTotalInDefaultCurrency calculates the total in the default currency
+func (b *Bot) calculateTotalInDefaultCurrency(totalUSD float64, defaultCurrency string) (float64, string) {
 	var totalInDefaultCurrency float64
 	var defaultCurrencyStr string
-
 	if defaultCurrency != "USD" {
 		rate, err := b.Exchange.GetRateToUSD(defaultCurrency)
 		if err == nil && rate > 0 {
-			// Convert from USD to default currency
 			totalInDefaultCurrency = totalUSD / rate
 			defaultCurrencyStr = fmt.Sprintf(" (≈ %.2f %s)", totalInDefaultCurrency, defaultCurrency)
 		}
 	}
+	return totalInDefaultCurrency, defaultCurrencyStr
+}
 
+// createExpenseMessage creates the expense message to be sent to the user
+func (b *Bot) createExpenseMessage(originalAmount interface{}, category, currency, defaultCurrency string) string {
 	var responseMsg string
-
-	// Format the message for the specific added expense
-	// If user's input currency is not USD, show both input currency and USD values
-	if displayCurrency != "USD" {
-		var usdAmount float64
-		var err error
-
-		// Convert the amount to USD for display
-		switch v := originalAmount.(type) {
-		case int:
-			usdAmount, err = b.Exchange.ConvertIntToUSD(v, displayCurrency)
-			if err == nil {
-				responseMsg = fmt.Sprintf("Added %d %s (≈ %.2f USD) to category '%s'\n", v, displayCurrency, usdAmount, category)
-			}
-		case float64:
-			usdAmount, err = b.Exchange.ConvertToUSD(v, displayCurrency)
-			if err == nil {
-				responseMsg = fmt.Sprintf("Added %.2f %s (≈ %.2f USD) to category '%s'\n", v, displayCurrency, usdAmount, category)
-			}
-		}
-
-		if err != nil {
-			responseMsg = fmt.Sprintf("Added amount in %s to category '%s' (conversion error)\n", displayCurrency, category)
+	if currency != "USD" {
+		usdAmount, err := b.convertToUSD(originalAmount, currency)
+		if err == nil {
+			responseMsg = fmt.Sprintf("Added %v %s (≈ %.2f USD) to category '%s'\n", originalAmount, currency, usdAmount, category)
+		} else {
+			responseMsg = fmt.Sprintf("Added amount in %s to category '%s' (conversion error)\n", currency, category)
 		}
 	} else {
-		// Currency is USD
 		switch v := originalAmount.(type) {
 		case int:
 			responseMsg = fmt.Sprintf("Added %d USD to category '%s'\n", v, category)
@@ -151,21 +142,18 @@ func (b *Bot) handleRegularMessage(message *tgbotapi.Message) {
 			responseMsg = fmt.Sprintf("Added %.2f USD to category '%s'\n", v, category)
 		}
 	}
+	return responseMsg
+}
 
-	// Add total for the month (in USD and default currency if different)
-	responseMsg += fmt.Sprintf("Total for this month: %.2f USD%s\n", totalUSD, defaultCurrencyStr)
-
-	// Add the category breakdown
-	responseMsg += "```json\n"
-	responseMsg += string(jsonBytes)
-	responseMsg += "\n```"
-
-	responseMsg = utils.EscapeMarkdownV2(responseMsg)
-
-	msg := tgbotapi.NewMessage(message.Chat.ID, responseMsg)
-	msg.ParseMode = "MarkdownV2"
-
-	b.API.Send(msg)
+// convertToUSD converts the amount to USD
+func (b *Bot) convertToUSD(amount interface{}, currency string) (float64, error) {
+	switch v := amount.(type) {
+	case int:
+		return b.Exchange.ConvertIntToUSD(v, currency)
+	case float64:
+		return b.Exchange.ConvertToUSD(v, currency)
+	}
+	return 0, fmt.Errorf("invalid amount type")
 }
 
 func (b *Bot) handleCommand(message *tgbotapi.Message) {
