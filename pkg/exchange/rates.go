@@ -17,17 +17,17 @@ func NewRateService() *RateService {
 	}
 }
 
-func (s *RateService) GetRateToUSD(fromCurrency string) (float64, error) {
-	// If the source currency is already USD, return 1.0 (1:1 conversion)
-	if strings.ToUpper(fromCurrency) == "USD" {
-		return 1.0, nil
+func (s *RateService) Convert(amount float64, from, to string) (float64, error) {
+	if strings.ToUpper(from) == strings.ToUpper(to) {
+		return amount, nil
 	}
 
-	apiURL := s.BaseURL + strings.ToUpper(fromCurrency)
+	apiURL := s.BaseURL + strings.ToUpper(from)
 	resp, err := http.Get(apiURL)
 	if err != nil {
 		return 0, err
 	}
+
 	defer resp.Body.Close()
 
 	var result map[string]interface{}
@@ -40,31 +40,12 @@ func (s *RateService) GetRateToUSD(fromCurrency string) (float64, error) {
 		return 0, fmt.Errorf("invalid response format")
 	}
 
-	rate, ok := rates["USD"].(float64)
+	rate, ok := rates[strings.ToUpper(to)].(float64)
 	if !ok {
-		return 0, fmt.Errorf("USD rate not found")
+		return 0, fmt.Errorf("rate not found")
 	}
 
-	return rate, nil
-}
+	converted := amount * rate
 
-func (s *RateService) ConvertToUSD(amount float64, fromCurrency string) (float64, error) {
-	rate, err := s.GetRateToUSD(fromCurrency)
-	if err != nil {
-		return 0, err
-	}
-
-	return amount * rate, nil
-}
-
-func (s *RateService) ConvertIntToUSD(amount int, fromCurrency string) (float64, error) {
-	return s.ConvertToUSD(float64(amount), fromCurrency)
-}
-
-func (s *RateService) GetRSDToUSD() (float64, error) {
-	return s.GetRateToUSD("RSD")
-}
-
-func (s *RateService) ConvertRSDToUSD(amountRSD int) (float64, error) {
-	return s.ConvertToUSD(float64(amountRSD), "RSD")
+	return converted, nil
 }
