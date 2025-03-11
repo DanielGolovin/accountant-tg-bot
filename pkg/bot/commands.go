@@ -13,6 +13,8 @@ import (
 
 func (b *Bot) handleCommand(message *tgbotapi.Message) {
 	switch message.Command() {
+	case "currency_codes":
+		b.handleCurrencyCodsCommand(message)
 	case "dump_db":
 		b.handleDumpDbCommand(message)
 	case "setcurrency":
@@ -33,6 +35,7 @@ func (b *Bot) handleHelpCommand(message *tgbotapi.Message) {
 - Add expense with explicit currency: "<amount> <currency> <category>"
 - /setcurrency <currency> - Set default output currency (e.g. USD, EUR, RSD)
 - /setinputcurrency <currency> - Set default input currency (e.g. USD, EUR, RSD)
+- /currency_codes - Get supported currency codes
 - /dump_db - Download database
 - /help - Show this help`, defaultCurrency, defaultInputCurrency)
 
@@ -128,4 +131,17 @@ func (b *Bot) handleDbUpload(message *tgbotapi.Message) {
 	}
 
 	b.API.Send(tgbotapi.NewMessage(message.Chat.ID, "DB updated"))
+}
+
+func (b *Bot) handleCurrencyCodsCommand(message *tgbotapi.Message) {
+	currencyCodes, err := b.Exchange.GetSupportedCurrencies()
+
+	if err != nil {
+		b.API.Send(tgbotapi.NewMessage(message.Chat.ID, "Error getting supported currencies"))
+		return
+	}
+
+	currencyCodesStr := strings.Join(currencyCodes, ", ")
+
+	b.API.Send(tgbotapi.NewMessage(message.Chat.ID, currencyCodesStr))
 }

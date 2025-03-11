@@ -61,8 +61,16 @@ func (b *Bot) handleRegularMessage(message *tgbotapi.Message) {
 		return
 	}
 
-	transaction := database.CreateTransaction(category, amount, currency)
-	currentDate := time.Now().Format("2006-01-02")
+	outputCurrency := b.DB.GetDefaultCurrency()
+	convertedAmount, err := b.Exchange.Convert(amount, currency, outputCurrency)
+	if err != nil {
+		log.Printf("Error converting amount: %v", err)
+		b.API.Send(tgbotapi.NewMessage(message.Chat.ID, "Error converting amount"))
+		return
+	}
+
+	transaction := database.CreateTransaction(category, convertedAmount, outputCurrency)
+	currentDate := time.Now().Format("2006-01")
 	b.DB.AddTransaction(currentDate, transaction)
 
 	responseMsg := b.formatResponseMessage(currentDate)

@@ -49,3 +49,30 @@ func (s *RateService) Convert(amount float64, from, to string) (float64, error) 
 
 	return converted, nil
 }
+
+func (s *RateService) GetSupportedCurrencies() ([]string, error) {
+	apiURL := s.BaseURL + "USD"
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	rates, ok := result["rates"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid response format")
+	}
+
+	currencies := make([]string, 0, len(rates))
+	for currency := range rates {
+		currencies = append(currencies, currency)
+	}
+
+	return currencies, nil
+}

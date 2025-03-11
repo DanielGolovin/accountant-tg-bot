@@ -8,7 +8,8 @@ WORKDIR /app
 
 COPY go.mod .
 COPY go.sum .
-COPY *.go .
+COPY main.go .
+COPY pkg/ ./pkg
 
 RUN go mod download
 RUN go build -o build/app
@@ -17,7 +18,7 @@ RUN go build -o build/app
 #       App Stage       #
 #########################
 
-FROM alpine:latest AS App
+FROM alpine:latest AS app
 
 COPY --from=builder /app/build /accountant
 
